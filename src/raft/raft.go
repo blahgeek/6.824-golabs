@@ -460,7 +460,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 				rf.commitCount = args.LeaderCommitCount
 				go rf.doCommitLogs()
 			}
-			reply.IndexHint = len(rf.logs)
+			reply.IndexHint = args.PrevLogCount
 			reply.Success = true
 		}
 
