@@ -26,8 +26,8 @@ import "log"
 import "os"
 import "fmt"
 
-// import "bytes"
-// import "encoding/gob"
+import "bytes"
+import "encoding/gob"
 
 func majority(n int) int {
 	return n/2 + 1
@@ -59,7 +59,7 @@ const (
 const (
 	MIN_TIMEOUT        = time.Millisecond * 200
 	MAX_TIMEOUT        = time.Millisecond * 500
-	HEARTBEAT_INTERVAL = time.Millisecond * 50
+	HEARTBEAT_INTERVAL = time.Millisecond * 20
 )
 
 type Raft struct {
@@ -122,6 +122,7 @@ func (rf *Raft) handleTimer() {
 		rf.state = CANDIDATE
 		rf.currentTerm += 1
 		rf.votedFor = rf.me
+		rf.persist()
 		rf.sendRequestVotes()
 		rf.granted_votes_count = 1
 	} else {
@@ -182,9 +183,9 @@ func (rf *Raft) handleAppendEntriesResult(reply AppendEntriesReply, peer int) {
 	}
 
 	if reply.Success {
-		rf.nextIndex[peer] += 1
+		rf.nextIndex[peer] = reply.IndexHint
 		if rf.nextIndex[peer] > len(rf.logs) {
-			rf.nextIndex[peer] = len(rf.logs)
+			panic("nextIndex should not be more than leader's logs")
 		}
 		rf.matchCount[peer] = rf.nextIndex[peer]
 		this_match_count_peers := 1
@@ -204,10 +205,11 @@ func (rf *Raft) handleAppendEntriesResult(reply AppendEntriesReply, peer int) {
 			go rf.doCommitLogs()
 		}
 	} else {
-		rf.nextIndex[peer] -= 1
+		rf.nextIndex[peer] = reply.IndexHint
 		if rf.nextIndex[peer] < 0 {
 			panic("nextIndex should not go negative")
 		}
+		rf.sendAppendEntriesAll()
 	}
 
 }
@@ -240,6 +242,13 @@ func (rf *Raft) GetState() (int, bool) {
 // see paper's Figure 2 for a description of what should be persistent.
 //
 func (rf *Raft) persist() {
+	buf := new(bytes.Buffer)
+	enc := gob.NewEncoder(buf)
+	enc.Encode(rf.currentTerm)
+	enc.Encode(rf.votedFor)
+	enc.Encode(rf.logs)
+	enc.Encode(rf.logs_term)
+	rf.persister.SaveRaftState(buf.Bytes())
 	// Your code here.
 	// Example:
 	// w := new(bytes.Buffer)
@@ -254,6 +263,15 @@ func (rf *Raft) persist() {
 // restore previously persisted state.
 //
 func (rf *Raft) readPersist(data []byte) {
+	if data == nil {
+		return
+	}
+	buf := bytes.NewBuffer(data)
+	dec := gob.NewDecoder(buf)
+	dec.Decode(&rf.currentTerm)
+	dec.Decode(&rf.votedFor)
+	dec.Decode(&rf.logs)
+	dec.Decode(&rf.logs_term)
 	// Your code here.
 	// Example:
 	// r := bytes.NewBuffer(data)
@@ -308,6 +326,7 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 		rf.logger.Printf("Got vote request with current term, now voted for %v\n", rf.votedFor)
 		if rf.votedFor == -1 && may_grant_vote {
 			rf.votedFor = args.CandidateID
+			rf.persist()
 		}
 		reply.Granted = (rf.votedFor == args.CandidateID)
 		reply.Term = rf.currentTerm
@@ -320,6 +339,7 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 		rf.votedFor = -1
 		if may_grant_vote {
 			rf.votedFor = args.CandidateID
+			rf.persist()
 		}
 		rf.resetTimer()
 
@@ -376,17 +396,20 @@ func (rf *Raft) sendRequestVotes() {
 // AppendEntries
 
 type AppendEntriesArgs struct {
-	Term              int
-	PrevLogCount      int
-	PrevLogTerm       int
-	Entry             interface{}
-	EntryTerm         int
+	Term         int
+	PrevLogCount int
+	PrevLogTerm  int
+	Entries      []interface{}
+	EntryTerms   []int
+	// Entry             interface{}
+	// EntryTerm         int
 	LeaderCommitCount int
 }
 
 type AppendEntriesReply struct {
-	Term    int
-	Success bool
+	Term      int
+	Success   bool
+	IndexHint int
 }
 
 func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply) {
@@ -407,27 +430,41 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 
 		if args.PrevLogCount > 0 && (len(rf.logs) < args.PrevLogCount || rf.logs_term[args.PrevLogCount-1] != args.PrevLogTerm) {
 			rf.logger.Printf("But not match: %v\n", args)
-			reply.Success = false
-		} else if args.Entry != nil {
-			rf.logger.Printf("Appending log %v with term %v\n", args.PrevLogCount, args.EntryTerm)
-			if len(rf.logs) == args.PrevLogCount {
-				rf.logs = append(rf.logs, nil)
-				rf.logs_term = append(rf.logs_term, 0)
+			reply.IndexHint = len(rf.logs)
+			if reply.IndexHint >= args.PrevLogCount {
+				reply.IndexHint = args.PrevLogCount
 			}
-			rf.logs[args.PrevLogCount] = args.Entry
-			rf.logs_term[args.PrevLogCount] = args.EntryTerm
-			if args.PrevLogCount >= args.LeaderCommitCount {
+			for reply.IndexHint > 0 {
+				if rf.logs_term[reply.IndexHint-1] == args.PrevLogTerm {
+					break
+				}
+				reply.IndexHint--
+			}
+			reply.Success = false
+		} else if args.Entries != nil {
+			rf.logger.Printf("Appending log from %v (count %v)\n", args.PrevLogCount, len(args.Entries))
+			rf.logs = rf.logs[:args.PrevLogCount]
+			rf.logs_term = rf.logs_term[:args.PrevLogCount]
+			rf.logs = append(rf.logs, args.Entries...)
+			rf.logs_term = append(rf.logs_term, args.EntryTerms...)
+
+			if len(rf.logs) >= args.LeaderCommitCount {
 				rf.commitCount = args.LeaderCommitCount
 				go rf.doCommitLogs()
 			}
+			reply.IndexHint = len(rf.logs)
 			reply.Success = true
 		} else {
 			rf.logger.Printf("It's a heartbeat...\n")
-			rf.commitCount = args.LeaderCommitCount
-			go rf.doCommitLogs()
+			if len(rf.logs) >= args.LeaderCommitCount {
+				rf.commitCount = args.LeaderCommitCount
+				go rf.doCommitLogs()
+			}
+			reply.IndexHint = len(rf.logs)
 			reply.Success = true
 		}
 
+		rf.persist()
 		rf.resetTimer()
 	}
 }
@@ -445,8 +482,8 @@ func (rf *Raft) sendAppendEntriesAll() {
 			args.PrevLogTerm = rf.logs_term[args.PrevLogCount-1]
 		}
 		if rf.nextIndex[peer] < len(rf.logs) {
-			args.Entry = rf.logs[rf.nextIndex[peer]]
-			args.EntryTerm = rf.logs_term[rf.nextIndex[peer]]
+			args.Entries = rf.logs[rf.nextIndex[peer]:]
+			args.EntryTerms = rf.logs_term[rf.nextIndex[peer]:]
 		}
 		args.LeaderCommitCount = rf.commitCount
 
@@ -484,6 +521,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := len(rf.logs)
 	rf.logs = append(rf.logs, command)
 	rf.logs_term = append(rf.logs_term, rf.currentTerm)
+	rf.persist()
 
 	rf.logger.Printf("New command, append at %v with term = %v\n", index, rf.currentTerm)
 
@@ -532,10 +570,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.nextIndex = make([]int, len(peers))
 	rf.matchCount = make([]int, len(peers))
 	rf.applyCh = applyCh
-	rf.resetTimer()
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
+	rf.resetTimer()
 
 	return rf
 }
