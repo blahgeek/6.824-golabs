@@ -59,7 +59,7 @@ const (
 const (
 	MIN_TIMEOUT        = time.Millisecond * 200
 	MAX_TIMEOUT        = time.Millisecond * 500
-	HEARTBEAT_INTERVAL = time.Millisecond * 20
+	HEARTBEAT_INTERVAL = time.Millisecond * 50
 )
 
 type Raft struct {
