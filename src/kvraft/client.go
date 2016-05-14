@@ -35,13 +35,13 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 }
 
 func (ck *Clerk) exec(op Op) string {
-	var reply OpReply
 	var ok bool
 
 	op.Client = ck.client_id
 	op.Id = atomic.AddInt64(&ck.op_id, 1)
 
 	for {
+		var reply OpReply
 		ck.logger.Printf("Try executing %v to leader %v\n", op, ck.leader)
 		ok = ck.servers[ck.leader].Call("RaftKV.Exec", op, &reply)
 		ck.logger.Printf("Exec result: %v\n", reply)
