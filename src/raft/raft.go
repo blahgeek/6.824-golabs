@@ -75,6 +75,8 @@ type Raft struct {
 	logs        []interface{}
 	logs_term   []int
 
+	snapshotedCount int // if snapshotedCount = n, logs_term[n-1] is also stored
+
 	commitCount  int
 	appliedCount int
 
@@ -91,6 +93,24 @@ type Raft struct {
 	timer               *time.Timer
 
 	logger *log.Logger
+}
+
+func (rf *Raft) DeleteOldLogs(lastIndex int, snapshot []byte) { // called by server
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	lastIndex -= 1 // yes, all indexes number starts from 1 outside
+	rf.snapshotedCount = lastIndex + 1
+
+	if rf.snapshotedCount >= rf.appliedCount {
+		panic("Snapshoted count >= applied count")
+	}
+	rf.persister.SaveSnapshot(snapshot)
+
+	for i := 0; i < rf.snapshotedCount; i += 1 {
+		rf.logs[i] = nil
+	}
+	rf.persist()
 }
 
 func (rf *Raft) resetTimer() {
@@ -244,40 +264,46 @@ func (rf *Raft) GetState() (int, bool) {
 func (rf *Raft) persist() {
 	buf := new(bytes.Buffer)
 	enc := gob.NewEncoder(buf)
+	enc.Encode(rf.snapshotedCount)
 	enc.Encode(rf.currentTerm)
 	enc.Encode(rf.votedFor)
-	enc.Encode(rf.logs)
-	enc.Encode(rf.logs_term)
+
+	enc.Encode(rf.logs[rf.snapshotedCount:])
+	enc.Encode(rf.logs_term[rf.snapshotedCount:])
+	if rf.snapshotedCount > 0 {
+		enc.Encode(rf.logs_term[rf.snapshotedCount-1])
+	}
+
 	rf.persister.SaveRaftState(buf.Bytes())
-	// Your code here.
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := gob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
 }
 
 //
 // restore previously persisted state.
 //
-func (rf *Raft) readPersist(data []byte) {
+func (rf *Raft) readPersist() {
+	data := rf.persister.ReadRaftState()
 	if data == nil {
 		return
 	}
 	buf := bytes.NewBuffer(data)
 	dec := gob.NewDecoder(buf)
+
+	dec.Decode(&rf.snapshotedCount)
 	dec.Decode(&rf.currentTerm)
 	dec.Decode(&rf.votedFor)
-	dec.Decode(&rf.logs)
-	dec.Decode(&rf.logs_term)
-	// Your code here.
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := gob.NewDecoder(r)
-	// d.Decode(&rf.xxx)
-	// d.Decode(&rf.yyy)
+
+	var logs_tmp []interface{}
+	var logs_term_tmp []int
+	dec.Decode(&logs_tmp)
+	dec.Decode(&logs_term_tmp)
+	rf.logs = make([]interface{}, len(logs_tmp)+rf.snapshotedCount)
+	rf.logs_term = make([]int, len(logs_term_tmp)+rf.snapshotedCount)
+	copy(rf.logs[rf.snapshotedCount:], logs_tmp)
+	copy(rf.logs_term[rf.snapshotedCount:], logs_term_tmp)
+
+	if rf.snapshotedCount > 0 {
+		dec.Decode(&rf.logs_term[rf.snapshotedCount-1])
+	}
 }
 
 //
@@ -572,7 +598,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.applyCh = applyCh
 
 	// initialize from state persisted before a crash
-	rf.readPersist(persister.ReadRaftState())
+	rf.readPersist()
 	rf.resetTimer()
 
 	return rf
