@@ -502,6 +502,11 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 			reply.Success = false
 		} else if args.Entries != nil {
 			rf.logger.Printf("Appending log from %v (count %v)\n", args.PrevLogCount, len(args.Entries))
+			for _, e := range args.Entries {
+				if e == nil {
+					panic("Entries in AppendEntries cannot be nil")
+				}
+			}
 			rf.logs = rf.logs[:args.PrevLogCount]
 			rf.logs_term = rf.logs_term[:args.PrevLogCount]
 			rf.logs = append(rf.logs, args.Entries...)
@@ -546,8 +551,10 @@ func (rf *Raft) sendAppendEntriesAll() {
 			args.PrevLogTerm = rf.logs_term[args.PrevLogCount-1]
 		}
 		if args.PrevLogCount < len(rf.logs) {
-			args.Entries = rf.logs[args.PrevLogCount:]
-			args.EntryTerms = rf.logs_term[args.PrevLogCount:]
+			args.Entries = make([]interface{}, len(rf.logs)-args.PrevLogCount)
+			args.EntryTerms = make([]int, len(rf.logs)-args.PrevLogCount)
+			copy(args.Entries, rf.logs[args.PrevLogCount:])
+			copy(args.EntryTerms, rf.logs_term[args.PrevLogCount:])
 		}
 		args.LeaderCommitCount = rf.commitCount
 
