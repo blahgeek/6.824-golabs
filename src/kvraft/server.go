@@ -1,6 +1,7 @@
 package raftkv
 
 import (
+	"bytes"
 	"encoding/gob"
 	"fmt"
 	"labrpc"
@@ -20,10 +21,11 @@ type PendingOp struct {
 }
 
 type RaftKV struct {
-	mu      sync.Mutex
-	me      int
-	rf      *raft.Raft
-	applyCh chan raft.ApplyMsg
+	mu        sync.Mutex
+	me        int
+	rf        *raft.Raft
+	persister *raft.Persister
+	applyCh   chan raft.ApplyMsg
 
 	maxraftstate int // snapshot if log grows this big
 
@@ -46,6 +48,12 @@ func (s *PendingOpsSorter) Less(i, j int) bool { return s.ops[i].op.Id < s.ops[j
 func (kv *RaftKV) Apply(msg *raft.ApplyMsg) {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
+
+	if msg.UseSnapshot {
+		kv.logger.Printf("Applying snapshot... index=%v\n", msg.Index)
+		kv.loadSnapshot(msg.Snapshot)
+		return
+	}
 
 	op := msg.Command.(Op)
 
@@ -77,6 +85,12 @@ func (kv *RaftKV) Apply(msg *raft.ApplyMsg) {
 			kv.logger.Printf("Pending op: %v, fail\n", x.op)
 			x.c <- false
 		}
+	}
+
+	if kv.maxraftstate > 0 && kv.persister.RaftStateSize() >= kv.maxraftstate {
+		kv.logger.Printf("Raft size too large, going to delete old logs\n")
+		snapshot := kv.dumpSnapshot()
+		go kv.rf.DeleteOldLogs(msg.Index, snapshot)
 	}
 }
 
@@ -132,6 +146,21 @@ func (kv *RaftKV) Kill() {
 	// Your code here, if desired.
 }
 
+func (kv *RaftKV) dumpSnapshot() []byte {
+	buf := new(bytes.Buffer)
+	enc := gob.NewEncoder(buf)
+	enc.Encode(kv.data)
+	enc.Encode(kv.client_last_op)
+	return buf.Bytes()
+}
+
+func (kv *RaftKV) loadSnapshot(snapshot []byte) {
+	buf := bytes.NewBuffer(snapshot)
+	dec := gob.NewDecoder(buf)
+	dec.Decode(&kv.data)
+	dec.Decode(&kv.client_last_op)
+}
+
 //
 // servers[] contains the ports of the set of
 // servers that will cooperate via Raft to
@@ -154,6 +183,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv := new(RaftKV)
 	kv.me = me
 	kv.maxraftstate = maxraftstate
+	kv.persister = persister
 
 	// Your initialization code here.
 

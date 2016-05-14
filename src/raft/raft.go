@@ -100,13 +100,19 @@ func (rf *Raft) DeleteOldLogs(lastIndex int, snapshot []byte) { // called by ser
 	defer rf.mu.Unlock()
 
 	lastIndex -= 1 // yes, all indexes number starts from 1 outside
+
+	if lastIndex < rf.snapshotedCount {
+		return
+	}
+
 	rf.snapshotedCount = lastIndex + 1
 
-	if rf.snapshotedCount >= rf.appliedCount {
-		panic("Snapshoted count >= applied count")
+	if rf.snapshotedCount > rf.appliedCount {
+		panic("Snapshoted count > applied count")
 	}
 	rf.persister.SaveSnapshot(snapshot)
 
+	rf.logger.Printf("Deleting old logs up to %v\n", rf.snapshotedCount)
 	for i := 0; i < rf.snapshotedCount; i += 1 {
 		rf.logs[i] = nil
 	}
@@ -242,12 +248,24 @@ func (rf *Raft) doCommitLogs() {
 	if real_commit_count > len(rf.logs) {
 		real_commit_count = len(rf.logs)
 	}
+
+	if rf.appliedCount < rf.snapshotedCount {
+		rf.logger.Printf("Applying snapshot up to %v\n", rf.snapshotedCount)
+		rf.appliedCount = rf.snapshotedCount
+		snapshot := rf.persister.ReadSnapshot()
+		rf.applyCh <- ApplyMsg{Index: rf.snapshotedCount - 1 + 1, // attension
+			UseSnapshot: true, Snapshot: snapshot}
+	}
+
 	for i := rf.appliedCount; i < real_commit_count; i += 1 {
 		rf.logger.Printf("Applying cmd %v\n", i)
 		// in the paper, index starts from 1
+		rf.appliedCount += 1
+		if rf.logs[i] == nil {
+			panic("Logs after snapshotedCount should not be nil")
+		}
 		rf.applyCh <- ApplyMsg{Index: i + 1, Command: rf.logs[i]}
 	}
-	rf.appliedCount = real_commit_count
 }
 
 // return currentTerm and whether this server
@@ -334,6 +352,7 @@ func (rf *Raft) RequestVote(args RequestVoteArgs, reply *RequestVoteReply) {
 
 	may_grant_vote := true
 	if len(rf.logs) > 0 {
+		// rf.logs_term[len(rf.logs)-1] will always there, no matter snapshotedCount
 		if rf.logs_term[len(rf.logs)-1] > args.LastLogTerm ||
 			(rf.logs_term[len(rf.logs)-1] == args.LastLogTerm && len(rf.logs) > args.LogCount) {
 			may_grant_vote = false
@@ -423,6 +442,7 @@ func (rf *Raft) sendRequestVotes() {
 
 type AppendEntriesArgs struct {
 	Term         int
+	Snapshot     []byte // if present, it's snapshot up to PrevLogCount
 	PrevLogCount int
 	PrevLogTerm  int
 	Entries      []interface{}
@@ -454,13 +474,26 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 
 		reply.Term = args.Term
 
-		if args.PrevLogCount > 0 && (len(rf.logs) < args.PrevLogCount || rf.logs_term[args.PrevLogCount-1] != args.PrevLogTerm) {
+		if len(rf.logs) < args.PrevLogCount && args.Snapshot != nil {
+			rf.logger.Printf("Installing snapshot up to %v\n", args.PrevLogCount)
+			rf.persister.SaveSnapshot(args.Snapshot)
+			rf.logs = make([]interface{}, args.PrevLogCount)
+			rf.logs_term = make([]int, args.PrevLogCount)
+			rf.logs_term[args.PrevLogCount-1] = args.PrevLogTerm
+			rf.snapshotedCount = args.PrevLogCount
+		}
+
+		if args.PrevLogCount < rf.snapshotedCount {
+			rf.logger.Printf("Log already snapshoted, ignore\n")
+			reply.IndexHint = rf.snapshotedCount
+			reply.Success = true
+		} else if args.PrevLogCount > 0 && (len(rf.logs) < args.PrevLogCount || rf.logs_term[args.PrevLogCount-1] != args.PrevLogTerm) {
 			rf.logger.Printf("But not match: %v\n", args)
 			reply.IndexHint = len(rf.logs)
 			if reply.IndexHint >= args.PrevLogCount {
 				reply.IndexHint = args.PrevLogCount
 			}
-			for reply.IndexHint > 0 {
+			for reply.IndexHint > rf.snapshotedCount {
 				if rf.logs_term[reply.IndexHint-1] == args.PrevLogTerm {
 					break
 				}
@@ -504,12 +537,17 @@ func (rf *Raft) sendAppendEntriesAll() {
 		var args AppendEntriesArgs
 		args.Term = rf.currentTerm
 		args.PrevLogCount = rf.nextIndex[peer]
+		if args.PrevLogCount < rf.snapshotedCount {
+			args.PrevLogCount = rf.snapshotedCount
+			args.Snapshot = rf.persister.ReadSnapshot()
+		}
+
 		if args.PrevLogCount > 0 {
 			args.PrevLogTerm = rf.logs_term[args.PrevLogCount-1]
 		}
-		if rf.nextIndex[peer] < len(rf.logs) {
-			args.Entries = rf.logs[rf.nextIndex[peer]:]
-			args.EntryTerms = rf.logs_term[rf.nextIndex[peer]:]
+		if args.PrevLogCount < len(rf.logs) {
+			args.Entries = rf.logs[args.PrevLogCount:]
+			args.EntryTerms = rf.logs_term[args.PrevLogCount:]
 		}
 		args.LeaderCommitCount = rf.commitCount
 
