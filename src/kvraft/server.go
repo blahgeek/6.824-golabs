@@ -42,6 +42,7 @@ func (s *PendingOpsSorter) Less(i, j int) bool { return s.ops[i].op.Id < s.ops[j
 
 func (kv *RaftKV) Apply(msg *raft.ApplyMsg) {
 	kv.mu.Lock()
+	defer kv.mu.Unlock()
 
 	op := msg.Command.(Op)
 
@@ -60,8 +61,6 @@ func (kv *RaftKV) Apply(msg *raft.ApplyMsg) {
 
 	this_pending := kv.pendingOps[msg.Index]
 	delete(kv.pendingOps, msg.Index)
-
-	kv.mu.Unlock()
 
 	kv.logger.Printf("Applying command at %v, pending ops: %v\n", msg.Index, len(this_pending))
 	sorter := PendingOpsSorter{this_pending}
@@ -103,6 +102,9 @@ func (kv *RaftKV) Exec(op Op, reply *OpReply) {
 		kv.logger.Printf("Wait not ok, return\n")
 		return
 	}
+
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
 
 	reply.Status = STATUS_OK
 	if op.Type == OP_GET {
@@ -157,7 +159,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	go func() {
 		for {
 			msg := <-kv.applyCh
-			go kv.Apply(&msg)
+			kv.Apply(&msg)
 		}
 	}()
 
