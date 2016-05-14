@@ -9,7 +9,10 @@ import (
 	"raft"
 	"sort"
 	"sync"
+	"time"
 )
+
+const EXEC_TIMEOUT = time.Second * 3
 
 type PendingOp struct {
 	op *Op
@@ -78,25 +81,30 @@ func (kv *RaftKV) Apply(msg *raft.ApplyMsg) {
 }
 
 func (kv *RaftKV) Exec(op Op, reply *OpReply) {
-	kv.mu.Lock()
-
 	kv.logger.Printf("Exec: %v\n", op)
 
 	op_index, _, is_leader := kv.rf.Start(op)
 	if !is_leader {
 		reply.Status = STATUS_WRONG_LEADER
 		kv.logger.Printf("Not leader, return\n")
-		kv.mu.Unlock()
 		return
 	}
 
 	waiter := make(chan bool, 1)
+	kv.mu.Lock()
 	kv.pendingOps[op_index] = append(kv.pendingOps[op_index], &PendingOp{op: &op, c: waiter})
+	kv.mu.Unlock()
 	kv.logger.Printf("Waiting for index = %v\n", op_index)
 
-	kv.mu.Unlock()
+	var ok bool
+	timer := time.NewTimer(EXEC_TIMEOUT)
+	select {
+	case ok = <-waiter:
+	case <-timer.C:
+		kv.logger.Printf("Wait timeout...\n")
+		ok = false
+	}
 
-	ok := <-waiter
 	if !ok {
 		reply.Status = STATUS_WRONG_LEADER
 		kv.logger.Printf("Wait not ok, return\n")

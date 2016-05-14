@@ -46,8 +46,8 @@ func (ck *Clerk) exec(op Op) string {
 		ok = ck.servers[ck.leader].Call("RaftKV.Exec", op, &reply)
 		ck.logger.Printf("Exec result: %v\n", reply)
 		if !ok || reply.Status == STATUS_WRONG_LEADER {
-			ck.leader = int(nrand() % int64(len(ck.servers)))
-			ck.logger.Printf("RPC fail(%v) or wrong leader, random pick: %v\n", !ok, ck.leader)
+			ck.leader = (ck.leader + 1) % len(ck.servers)
+			ck.logger.Printf("RPC fail(%v) or wrong leader, pick next: %v\n", !ok, ck.leader)
 		} else {
 			ck.logger.Printf("OK, reply = %v\n", reply)
 			return reply.Value
