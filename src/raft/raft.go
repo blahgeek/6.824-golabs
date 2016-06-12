@@ -612,6 +612,11 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 //
 func (rf *Raft) Kill() {
 	// Your code here, if desired.
+
+	// this is a dirty (but smart) hack...
+	// which prevent future functions running...
+	// while also wait for all currently running functions to complete
+	rf.mu.Lock()
 }
 
 //
