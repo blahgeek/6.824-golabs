@@ -18,6 +18,7 @@ package raft
 //
 
 import "sync"
+import "sync/atomic"
 import "labrpc"
 import "time"
 import crand "crypto/rand"
@@ -93,6 +94,7 @@ type Raft struct {
 	timer               *time.Timer
 
 	logger *log.Logger
+	killed int32
 }
 
 func (rf *Raft) DeleteOldLogs(lastIndex int, snapshot []byte) { // called by server
@@ -611,12 +613,18 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 // turn off debug output from this instance.
 //
 func (rf *Raft) Kill() {
-	// Your code here, if desired.
+	if !atomic.CompareAndSwapInt32(&rf.killed, 0, 1) {
+		return
+	}
 
 	// this is a dirty (but smart) hack...
 	// which prevent future functions running...
 	// while also wait for all currently running functions to complete
 	rf.mu.Lock()
+
+	// free up memory
+	rf.logs = nil
+	rf.logs_term = nil
 }
 
 //

@@ -10,6 +10,7 @@ import (
 	"raft"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -35,6 +36,7 @@ type RaftKV struct {
 	client_last_op map[int64]int64
 
 	logger *log.Logger
+	killed int32
 }
 
 type PendingOpsSorter struct {
@@ -142,6 +144,10 @@ func (kv *RaftKV) Exec(op Op, reply *OpReply) {
 // turn off debug output from this instance.
 //
 func (kv *RaftKV) Kill() {
+	if !atomic.CompareAndSwapInt32(&kv.killed, 0, 1) {
+		return
+	}
+
 	// see Raft.Kill()
 	kv.mu.Lock()
 	kv.rf.Kill()
