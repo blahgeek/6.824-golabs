@@ -149,8 +149,8 @@ func (kv *RaftKV) Kill() {
 	}
 
 	// see Raft.Kill()
-	kv.mu.Lock()
 	kv.rf.Kill()
+	kv.mu.Lock()
 
 	// free up memory
 	kv.data = nil
