@@ -142,7 +142,13 @@ func (kv *RaftKV) Exec(op Op, reply *OpReply) {
 // turn off debug output from this instance.
 //
 func (kv *RaftKV) Kill() {
+	// see Raft.Kill()
+	kv.mu.Lock()
 	kv.rf.Kill()
+
+	// free up memory
+	kv.data = nil
+	kv.pendingOps = nil
 	// Your code here, if desired.
 }
 
