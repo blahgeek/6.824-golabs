@@ -1,30 +1,16 @@
 package raftkv
 
-type StatusType int
+import "raftsc"
 
-const (
-	STATUS_OK           StatusType = iota
-	STATUS_WRONG_LEADER StatusType = iota
-)
-
-type OpType int
-
-const (
-	OP_GET    OpType = iota
-	OP_PUT    OpType = iota
-	OP_APPEND OpType = iota
-)
-
-type Op struct {
-	Type  OpType
+type OpData struct {
 	Key   string
-	Value string // empty for GET
-
-	Client int64 // which client sends this OP?
-	Id     int64 // unique for this client, monotone increase
+	Value string
 }
 
-type OpReply struct {
-	Status StatusType
-	Value  string
-}
+type OpReplyData string
+
+const (
+	OP_GET    raftsc.OpType = iota
+	OP_PUT    raftsc.OpType = iota
+	OP_APPEND raftsc.OpType = iota
+)

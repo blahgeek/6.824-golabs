@@ -1,58 +1,10 @@
 package raftkv
 
+import "raftsc"
 import "labrpc"
-import "crypto/rand"
-import "math/big"
-import "sync/atomic"
-import "log"
-import "os"
-import "fmt"
 
 type Clerk struct {
-	servers []*labrpc.ClientEnd
-	leader  int
-
-	client_id int64
-	op_id     int64
-
-	logger *log.Logger
-}
-
-func nrand() int64 {
-	max := big.NewInt(int64(1) << 62)
-	bigx, _ := rand.Int(rand.Reader, max)
-	x := bigx.Int64()
-	return x
-}
-
-func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
-	ck := new(Clerk)
-	ck.servers = servers
-	ck.client_id = nrand()
-	ck.logger = log.New(os.Stderr, fmt.Sprintf("[Clerk %v]", ck.client_id), log.LstdFlags)
-	ck.logger.Printf("New clerk inited\n")
-	return ck
-}
-
-func (ck *Clerk) exec(op Op) string {
-	var ok bool
-
-	op.Client = ck.client_id
-	op.Id = atomic.AddInt64(&ck.op_id, 1)
-
-	for {
-		var reply OpReply
-		ck.logger.Printf("Try executing %v to leader %v\n", op, ck.leader)
-		ok = ck.servers[ck.leader].Call("RaftKV.Exec", op, &reply)
-		ck.logger.Printf("Exec result: %v\n", reply)
-		if !ok || reply.Status == STATUS_WRONG_LEADER {
-			ck.leader = (ck.leader + 1) % len(ck.servers)
-			ck.logger.Printf("RPC fail(%v) or wrong leader, pick next: %v\n", !ok, ck.leader)
-		} else {
-			ck.logger.Printf("OK, reply = %v\n", reply)
-			return reply.Value
-		}
-	}
+	raftsc.RaftClient
 }
 
 //
@@ -68,11 +20,17 @@ func (ck *Clerk) exec(op Op) string {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) Get(key string) string {
-	return ck.exec(Op{Type: OP_GET, Key: key})
+	ret := ck.Exec(OP_GET, OpData{Key: key})
+	return ret.(string)
 }
 func (ck *Clerk) Put(key string, value string) {
-	ck.exec(Op{Type: OP_PUT, Key: key, Value: value})
+	ck.Exec(OP_PUT, OpData{Key: key, Value: value})
 }
 func (ck *Clerk) Append(key string, value string) {
-	ck.exec(Op{Type: OP_APPEND, Key: key, Value: value})
+	ck.Exec(OP_APPEND, OpData{Key: key, Value: value})
+}
+
+func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
+	c := raftsc.MakeClient(servers, "RaftKV")
+	return &Clerk{*c}
 }
