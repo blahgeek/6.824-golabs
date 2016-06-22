@@ -20,6 +20,25 @@ package shardmaster
 // You will need to add fields to the RPC arguments.
 //
 
+import "raftsc"
+
+const (
+	OP_JOIN  raftsc.OpType = iota
+	OP_LEAVE raftsc.OpType = iota
+	OP_MOVE  raftsc.OpType = iota
+	OP_QUERY raftsc.OpType = iota
+)
+
+type OpData struct {
+	// new GID -> servers mapping, for JOIN, also for LEAVE (value is empty)
+	Servers map[int][]string
+	// For Move
+	Shard int
+	GID   int
+	// For Query
+	ConfigNum int
+}
+
 // The number of shards.
 const NShards = 10
 
@@ -29,48 +48,4 @@ type Config struct {
 	Num    int              // config number
 	Shards [NShards]int     // shard -> gid
 	Groups map[int][]string // gid -> servers[]
-}
-
-const (
-	OK = "OK"
-)
-
-type Err string
-
-type JoinArgs struct {
-	Servers map[int][]string // new GID -> servers mappings
-}
-
-type JoinReply struct {
-	WrongLeader bool
-	Err         Err
-}
-
-type LeaveArgs struct {
-	GIDs []int
-}
-
-type LeaveReply struct {
-	WrongLeader bool
-	Err         Err
-}
-
-type MoveArgs struct {
-	Shard int
-	GID   int
-}
-
-type MoveReply struct {
-	WrongLeader bool
-	Err         Err
-}
-
-type QueryArgs struct {
-	Num int // desired config number
-}
-
-type QueryReply struct {
-	WrongLeader bool
-	Err         Err
-	Config      Config
 }

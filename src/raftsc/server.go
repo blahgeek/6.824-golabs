@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2016-06-13
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2016-06-13
+* @Last Modified time: 2016-06-21
  */
 
 package raftsc
@@ -172,7 +172,7 @@ func (rs *RaftServer) loadSnapshot(snapshot []byte) {
 	dec.Decode(&rs.client_last_op)
 }
 
-func (rs *RaftServer) GetRaftInstance() *raft.Raft {
+func (rs *RaftServer) Raft() *raft.Raft {
 	return rs.rf
 }
 
