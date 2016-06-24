@@ -77,31 +77,7 @@ func (kv *ShardKVImpl) pushShards() {
 		}
 		kv.mu.Unlock()
 	}
-	// kv.mu.Lock()
-	// defer kv.mu.Unlock()
-	// for shard, ps := range kv.pushing_shards {
-	// 	kv.logger.Printf("Pushing shard %v to group %v, config=%v\n", shard, ps.Group, ps.ConfigNum)
-	// 	var servers []*labrpc.ClientEnd
-	// 	for _, server_name := range ps.Servers {
-	// 		servers = append(servers, kv.make_end(server_name))
-	// 	}
-	// 	client := raftsc.MakeClient(servers, "ShardKV")
-	// 	push_ok, push_ret := client.DoExec(OP_PULL, OpData{
-	// 		ConfigNum: ps.ConfigNum,
-	// 		ShardNum:  shard,
-	// 		Shard:     ps.Shard,
-	// 	}, false) // do not retry
-	// 	if push_ok && push_ret.(OpReplyData).IsWrongGroup == false {
-	// 		kv.logger.Printf("Push shard %v to group %v done\n", shard, ps.Group)
-	// 		delete(kv.pushing_shards, shard)
-	// 	} else {
-	// 		kv.logger.Printf("Push shard %v to group %v failed (network ok=%v)\n", shard, ps.Group, push_ok)
-	// 	}
-	// }
 }
-
-// PULL accept condition:
-// save shards that should be send
 
 func (kv *ShardKVImpl) preparePush() {
 	if kv.config.Num == 1 {
@@ -183,9 +159,6 @@ func (kv *ShardKVImpl) ApplyOp(typ raftsc.OpType, data interface{}, dup bool) in
 	if !shard_dup {
 		kv.shards_client_last_op[target_shard][op_data.ShardOpClient] = op_data.ShardOpId
 	}
-
-	kv.logger.Printf("LOG last=%v, dup/s-dup: %v/%v\n", kv.shards_client_last_op[target_shard][op_data.ShardOpClient], dup, shard_dup)
-	kv.logger.Printf("LOG %v %v\n", typ, op_data)
 
 	if !shard_dup { // do not check `dup`
 		if typ == OP_PUT {
