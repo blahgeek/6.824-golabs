@@ -9,6 +9,7 @@ import "log"
 import "os"
 import "fmt"
 import "time"
+import "deepcopy"
 import "encoding/gob"
 
 type PushingShard struct {
@@ -122,9 +123,6 @@ func (kv *ShardKVImpl) preparePush() {
 			delete(kv.shards, shard)
 		}
 	}
-	if len(kv.pushing_shards) > 0 {
-		go kv.pushShards()
-	}
 }
 
 func (kv *ShardKVImpl) ApplyOp(typ raftsc.OpType, data interface{}, dup bool) interface{} {
@@ -148,7 +146,7 @@ func (kv *ShardKVImpl) ApplyOp(typ raftsc.OpType, data interface{}, dup bool) in
 			if op_data.Shard == nil {
 				panic("WTF, shard in data should not be nil")
 			}
-			kv.shards[op_data.ShardNum] = op_data.Shard
+			kv.shards[op_data.ShardNum] = deepcopy.Iface(op_data.Shard).(map[string]string)
 			kv.shards_latest_config[op_data.ShardNum] = op_data.ConfigNum
 		}
 		kv.preparePush()
@@ -156,7 +154,7 @@ func (kv *ShardKVImpl) ApplyOp(typ raftsc.OpType, data interface{}, dup bool) in
 	}
 
 	if typ == OP_NEWCONFIG {
-		kv.logger.Printf("Applying new config: %v\n", op_data.Config)
+		kv.logger.Printf("Applying new config: %v\n", op_data.Config.Num)
 		if dup || op_data.Config.Num <= kv.config.Num {
 			kv.logger.Printf("Config is old, ignore\n")
 			return nil
@@ -182,7 +180,7 @@ func (kv *ShardKVImpl) ApplyOp(typ raftsc.OpType, data interface{}, dup bool) in
 			p_shard[op_data.Key] = p_shard[op_data.Key] + op_data.Value
 		}
 	}
-	kv.logger.Println(kv.shards)
+	// kv.logger.Println(kv.shards)
 
 	reply_data.Value = p_shard[op_data.Key]
 	return reply_data
@@ -255,7 +253,7 @@ func StartServer(servers []*labrpc.ClientEnd,
 	go func() {
 		for {
 			kv.pushShards()
-			time.Sleep(50 * time.Millisecond)
+			time.Sleep(10 * time.Millisecond)
 		}
 	}()
 
