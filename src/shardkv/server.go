@@ -1,102 +1,263 @@
 package shardkv
 
-
-// import "shardmaster"
+import "shardmaster"
 import "labrpc"
 import "raft"
+import "raftsc"
 import "sync"
+import "log"
+import "os"
+import "fmt"
+import "time"
 import "encoding/gob"
 
+type PushingShard struct {
+	ConfigNum int // for which config
+	Shard     map[string]string
+	Group     int
+	Servers   []string
+}
 
+type ShardKVImpl struct {
+	mu     sync.Mutex
+	logger *log.Logger
 
-type Op struct {
-	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+	make_end func(string) *labrpc.ClientEnd
+	gid      int
+
+	config               shardmaster.Config        // the latest config, which I am using
+	shards               map[int]map[string]string // data
+	shards_latest_config map[int]int               // de-dup PULL op
+	pushing_shards       map[int]PushingShard
+}
+
+func (kv *ShardKVImpl) pushShardSingle(shard int, ps PushingShard) (ok bool) {
+	kv.logger.Printf("Pushing shard %v to group %v, config=%v\n", shard, ps.Group, ps.ConfigNum)
+	var servers []*labrpc.ClientEnd
+	for _, server_name := range ps.Servers {
+		servers = append(servers, kv.make_end(server_name))
+	}
+	client := raftsc.MakeClient(servers, "ShardKV")
+	push_ok, push_ret := client.DoExec(OP_PULL, OpData{
+		ConfigNum: ps.ConfigNum,
+		ShardNum:  shard,
+		Shard:     ps.Shard,
+	}, false) // do not retry
+	if push_ok && push_ret.(OpReplyData).IsWrongGroup == false {
+		kv.logger.Printf("Push shard %v to group %v done\n", shard, ps.Group)
+		ok = true
+		// delete(kv.pushing_shards, shard)
+	} else {
+		kv.logger.Printf("Push shard %v to group %v failed (network ok=%v)\n", shard, ps.Group, push_ok)
+		ok = false
+	}
+	return
+}
+
+func (kv *ShardKVImpl) pushShards() {
+	for shard, _ := range kv.config.Shards {
+		kv.mu.Lock()
+		ps, exist := kv.pushing_shards[shard]
+		if !exist {
+			kv.mu.Unlock()
+			continue
+		}
+		kv.mu.Unlock()
+
+		ok := kv.pushShardSingle(shard, ps)
+
+		kv.mu.Lock()
+		if ok && kv.pushing_shards[shard].ConfigNum == ps.ConfigNum {
+			delete(kv.pushing_shards, shard)
+		}
+		kv.mu.Unlock()
+	}
+	// kv.mu.Lock()
+	// defer kv.mu.Unlock()
+	// for shard, ps := range kv.pushing_shards {
+	// 	kv.logger.Printf("Pushing shard %v to group %v, config=%v\n", shard, ps.Group, ps.ConfigNum)
+	// 	var servers []*labrpc.ClientEnd
+	// 	for _, server_name := range ps.Servers {
+	// 		servers = append(servers, kv.make_end(server_name))
+	// 	}
+	// 	client := raftsc.MakeClient(servers, "ShardKV")
+	// 	push_ok, push_ret := client.DoExec(OP_PULL, OpData{
+	// 		ConfigNum: ps.ConfigNum,
+	// 		ShardNum:  shard,
+	// 		Shard:     ps.Shard,
+	// 	}, false) // do not retry
+	// 	if push_ok && push_ret.(OpReplyData).IsWrongGroup == false {
+	// 		kv.logger.Printf("Push shard %v to group %v done\n", shard, ps.Group)
+	// 		delete(kv.pushing_shards, shard)
+	// 	} else {
+	// 		kv.logger.Printf("Push shard %v to group %v failed (network ok=%v)\n", shard, ps.Group, push_ok)
+	// 	}
+	// }
+}
+
+// PULL accept condition:
+// save shards that should be send
+
+func (kv *ShardKVImpl) preparePush() {
+	if kv.config.Num == 1 {
+		// initial configuration
+		for shard, grp := range kv.config.Shards {
+			if grp == kv.gid && kv.shards_latest_config[shard] < 1 {
+				kv.logger.Printf("Initializing: add shard %v\n", shard)
+				kv.shards[shard] = map[string]string{}
+				kv.shards_latest_config[shard] = 1
+			}
+		}
+	}
+	// kv.pushing_shards = map[int]PushingShard{}
+	for shard, grp := range kv.config.Shards {
+		kv.logger.Printf("TEST shard %v, %v vs %v, nil? %v\n", shard, grp, kv.gid, kv.shards[shard] == nil)
+		if grp != kv.gid && kv.shards[shard] != nil {
+			kv.pushing_shards[shard] = PushingShard{
+				ConfigNum: kv.config.Num,
+				Shard:     kv.shards[shard],
+				Group:     grp,
+				Servers:   kv.config.Groups[grp],
+			}
+			delete(kv.shards, shard)
+		}
+	}
+	if len(kv.pushing_shards) > 0 {
+		go kv.pushShards()
+	}
+}
+
+func (kv *ShardKVImpl) ApplyOp(typ raftsc.OpType, data interface{}, dup bool) interface{} {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
+	op_data := data.(OpData)
+	var reply_data OpReplyData
+
+	if typ == OP_PULL {
+		kv.logger.Printf("Applying PULL: shard=%v, config=%v (shard's latest=%v)\n", op_data.ShardNum, op_data.ConfigNum, kv.shards_latest_config[op_data.ShardNum])
+		if op_data.ConfigNum > kv.config.Num {
+			kv.logger.Printf("My config is not ready (%v vs %v)\n", op_data.ConfigNum, kv.config.Num)
+			reply_data.IsWrongGroup = true
+			return reply_data
+		}
+		if !dup && op_data.ConfigNum > kv.shards_latest_config[op_data.ShardNum] {
+			if kv.shards[op_data.ShardNum] != nil {
+				panic("WTF, shard while receiving PULL should be nil")
+			}
+			if op_data.Shard == nil {
+				panic("WTF, shard in data should not be nil")
+			}
+			kv.shards[op_data.ShardNum] = op_data.Shard
+			kv.shards_latest_config[op_data.ShardNum] = op_data.ConfigNum
+		}
+		kv.preparePush()
+		return reply_data // unused
+	}
+
+	if typ == OP_NEWCONFIG {
+		kv.logger.Printf("Applying new config: %v\n", op_data.Config)
+		if dup || op_data.Config.Num <= kv.config.Num {
+			kv.logger.Printf("Config is old, ignore\n")
+			return nil
+		}
+		kv.config = op_data.Config
+		kv.preparePush()
+		return nil
+	}
+
+	target_shard := key2shard(op_data.Key)
+	p_shard := kv.shards[target_shard]
+	kv.logger.Printf("Applying OP %v (shard %v)[%v]\n", typ, target_shard, kv.config.Shards[target_shard])
+	if kv.config.Num == 0 || kv.config.Shards[target_shard] != kv.gid || p_shard == nil {
+		kv.logger.Printf("Wrong group")
+		reply_data.IsWrongGroup = true
+		return reply_data
+	}
+
+	if !dup {
+		if typ == OP_PUT {
+			p_shard[op_data.Key] = op_data.Value
+		} else if typ == OP_APPEND {
+			p_shard[op_data.Key] = p_shard[op_data.Key] + op_data.Value
+		}
+	}
+	kv.logger.Println(kv.shards)
+
+	reply_data.Value = p_shard[op_data.Key]
+	return reply_data
+}
+
+func (kv *ShardKVImpl) EncodeSnapshot(enc *gob.Encoder) {
+	enc.Encode(kv.shards)
+	enc.Encode(kv.shards_latest_config)
+	enc.Encode(kv.pushing_shards)
+	enc.Encode(kv.config)
+}
+
+func (kv *ShardKVImpl) DecodeSnapshot(dec *gob.Decoder) {
+	dec.Decode(&kv.shards)
+	dec.Decode(&kv.shards_latest_config)
+	dec.Decode(&kv.pushing_shards)
+	dec.Decode(&kv.config)
+}
+
+func (kv *ShardKVImpl) Free() {
+	kv.mu.Lock()
+	kv.shards = nil
+	kv.pushing_shards = nil
+	kv.shards_latest_config = nil
 }
 
 type ShardKV struct {
-	mu           sync.Mutex
-	me           int
-	rf           *raft.Raft
-	applyCh      chan raft.ApplyMsg
-	make_end     func(string) *labrpc.ClientEnd
-	gid          int
-	masters      []*labrpc.ClientEnd
-	maxraftstate int // snapshot if log grows this big
-
-	// Your definitions here.
+	*raftsc.RaftServer
+	rf *raft.Raft
 }
 
+func StartServer(servers []*labrpc.ClientEnd,
+	me int,
+	persister *raft.Persister,
+	maxraftstate int,
+	gid int,
+	masters []*labrpc.ClientEnd,
+	make_end func(string) *labrpc.ClientEnd) *ShardKV {
 
-func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
-}
+	gob.Register(OpData{})
+	gob.Register(OpReplyData{})
 
-func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	// Your code here.
-}
+	kv := &ShardKVImpl{
+		logger:               log.New(os.Stderr, fmt.Sprintf("[ShardKV G%v(%v)]", gid, me), log.LstdFlags),
+		make_end:             make_end,
+		gid:                  gid,
+		shards:               map[int]map[string]string{},
+		shards_latest_config: map[int]int{},
+		pushing_shards:       map[int]PushingShard{},
+	}
+	server := raftsc.StartServer(kv, servers, me, persister, maxraftstate)
 
-//
-// the tester calls Kill() when a ShardKV instance won't
-// be needed again. you are not required to do anything
-// in Kill(), but it might be convenient to (for example)
-// turn off debug output from this instance.
-//
-func (kv *ShardKV) Kill() {
-	kv.rf.Kill()
-	// Your code here, if desired.
-}
+	// watch for configs
+	if me == 0 {
+		go func() {
+			var last_config shardmaster.Config
+			master_clerk := shardmaster.MakeClerk(masters)
+			server_clerk := raftsc.MakeClient(servers, "ShardKV")
+			for {
+				config := master_clerk.Query(last_config.Num + 1)
+				if config.Num != last_config.Num {
+					server_clerk.Exec(OP_NEWCONFIG, OpData{Config: config})
+					time.Sleep(50 * time.Millisecond)
+					last_config = config
+				}
+			}
+		}()
+	}
 
+	go func() {
+		for {
+			kv.pushShards()
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
 
-//
-// servers[] contains the ports of the servers in this group.
-//
-// me is the index of the current server in servers[].
-//
-// the k/v server should store snapshots with
-// persister.SaveSnapshot(), and Raft should save its state (including
-// log) with persister.SaveRaftState().
-//
-// the k/v server should snapshot when Raft's saved state exceeds
-// maxraftstate bytes, in order to allow Raft to garbage-collect its
-// log. if maxraftstate is -1, you don't need to snapshot.
-//
-// gid is this group's GID, for interacting with the shardmaster.
-//
-// pass masters[] to shardmaster.MakeClerk() so you can send
-// RPCs to the shardmaster.
-//
-// make_end(servername) turns a server name from a
-// Config.Groups[gid][i] into a labrpc.ClientEnd on which you can
-// send RPCs. You'll need this to send RPCs to other groups.
-//
-// look at client.go for examples of how to use masters[]
-// and make_end() to send RPCs to the group owning a specific shard.
-//
-// StartServer() must return quickly, so it should start goroutines
-// for any long-running work.
-//
-func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int, gid int, masters []*labrpc.ClientEnd, make_end func(string) *labrpc.ClientEnd) *ShardKV {
-	// call gob.Register on structures you want
-	// Go's RPC library to marshall/unmarshall.
-	gob.Register(Op{})
-
-	kv := new(ShardKV)
-	kv.me = me
-	kv.maxraftstate = maxraftstate
-	kv.make_end = make_end
-	kv.gid = gid
-	kv.masters = masters
-
-	// Your initialization code here.
-
-	// Use something like this to talk to the shardmaster:
-	// kv.mck = shardmaster.MakeClerk(kv.masters)
-
-	kv.applyCh = make(chan raft.ApplyMsg)
-	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
-
-
-	return kv
+	return &ShardKV{server, server.Raft()}
 }

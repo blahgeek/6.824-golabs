@@ -9,37 +9,29 @@ package shardkv
 // You will have to modify these definitions.
 //
 
+import "raftsc"
+import "shardmaster"
+
 const (
-	OK            = "OK"
-	ErrNoKey      = "ErrNoKey"
-	ErrWrongGroup = "ErrWrongGroup"
+	OP_PUT       raftsc.OpType = iota
+	OP_APPEND    raftsc.OpType = iota
+	OP_GET       raftsc.OpType = iota
+	OP_PULL      raftsc.OpType = iota
+	OP_NEWCONFIG raftsc.OpType = iota
 )
 
-type Err string
-
-// Put or Append
-type PutAppendArgs struct {
-	// You'll have to add definitions here.
+type OpData struct {
 	Key   string
 	Value string
-	Op    string // "Put" or "Append"
-	// You'll have to add definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+	// used by OP_PULL
+	ConfigNum int
+	ShardNum  int
+	Shard     map[string]string
+	// used by OP_NEWCONFIG
+	Config shardmaster.Config
 }
 
-type PutAppendReply struct {
-	WrongLeader bool
-	Err         Err
-}
-
-type GetArgs struct {
-	Key string
-	// You'll have to add definitions here.
-}
-
-type GetReply struct {
-	WrongLeader bool
-	Err         Err
-	Value       string
+type OpReplyData struct {
+	IsWrongGroup bool
+	Value        string
 }
