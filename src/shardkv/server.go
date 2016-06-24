@@ -17,6 +17,7 @@ type PushingShard struct {
 	Shard     map[string]string
 	Group     int
 	Servers   []string
+	LastOp    map[int64]int64
 }
 
 type ShardKVImpl struct {
@@ -34,7 +35,7 @@ type ShardKVImpl struct {
 	shards_client_last_op map[int]map[int64]int64 // client's last op id for each shard
 }
 
-func (kv *ShardKVImpl) pushShardSingle(shard int, ps PushingShard, last_op map[int64]int64) (ok bool) {
+func (kv *ShardKVImpl) pushShardSingle(shard int, ps PushingShard) (ok bool) {
 	kv.logger.Printf("Pushing shard %v to group %v, config=%v\n", shard, ps.Group, ps.ConfigNum)
 	var servers []*labrpc.ClientEnd
 	for _, server_name := range ps.Servers {
@@ -45,7 +46,7 @@ func (kv *ShardKVImpl) pushShardSingle(shard int, ps PushingShard, last_op map[i
 		ConfigNum:         ps.ConfigNum,
 		ShardNum:          shard,
 		Shard:             ps.Shard,
-		ShardClientLastOp: last_op,
+		ShardClientLastOp: ps.LastOp,
 	}, false) // do not retry
 	if push_ok && push_ret.(OpReplyData).IsWrongGroup == false {
 		kv.logger.Printf("Push shard %v to group %v done\n", shard, ps.Group)
@@ -66,10 +67,9 @@ func (kv *ShardKVImpl) pushShards() {
 			kv.mu.Unlock()
 			continue
 		}
-		last_op := kv.shards_client_last_op[shard]
 		kv.mu.Unlock()
 
-		ok := kv.pushShardSingle(shard, ps, last_op)
+		ok := kv.pushShardSingle(shard, ps)
 
 		kv.mu.Lock()
 		if ok && kv.pushing_shards[shard].ConfigNum == ps.ConfigNum {
@@ -97,10 +97,12 @@ func (kv *ShardKVImpl) preparePush() {
 			kv.pushing_shards[shard] = PushingShard{
 				ConfigNum: kv.config.Num,
 				Shard:     kv.shards[shard],
+				LastOp:    kv.shards_client_last_op[shard],
 				Group:     grp,
 				Servers:   kv.config.Groups[grp],
 			}
 			delete(kv.shards, shard)
+			delete(kv.shards_client_last_op, shard)
 		}
 	}
 }
