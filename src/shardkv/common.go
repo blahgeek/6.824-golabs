@@ -21,12 +21,17 @@ const (
 )
 
 type OpData struct {
-	Key   string
-	Value string
+	Key           string
+	Value         string
+	ShardOpId     int64
+	ShardOpClient int64
 	// used by OP_PULL
 	ConfigNum int
 	ShardNum  int
 	Shard     map[string]string
+
+	ShardClientLastOp map[int64]int64
+
 	// used by OP_NEWCONFIG
 	Config shardmaster.Config
 }

@@ -30,9 +30,11 @@ type ShardKVImpl struct {
 	shards               map[int]map[string]string // data
 	shards_latest_config map[int]int               // de-dup PULL op
 	pushing_shards       map[int]PushingShard
+
+	shards_client_last_op map[int]map[int64]int64 // client's last op id for each shard
 }
 
-func (kv *ShardKVImpl) pushShardSingle(shard int, ps PushingShard) (ok bool) {
+func (kv *ShardKVImpl) pushShardSingle(shard int, ps PushingShard, last_op map[int64]int64) (ok bool) {
 	kv.logger.Printf("Pushing shard %v to group %v, config=%v\n", shard, ps.Group, ps.ConfigNum)
 	var servers []*labrpc.ClientEnd
 	for _, server_name := range ps.Servers {
@@ -40,9 +42,10 @@ func (kv *ShardKVImpl) pushShardSingle(shard int, ps PushingShard) (ok bool) {
 	}
 	client := raftsc.MakeClient(servers, "ShardKV")
 	push_ok, push_ret := client.DoExec(OP_PULL, OpData{
-		ConfigNum: ps.ConfigNum,
-		ShardNum:  shard,
-		Shard:     ps.Shard,
+		ConfigNum:         ps.ConfigNum,
+		ShardNum:          shard,
+		Shard:             ps.Shard,
+		ShardClientLastOp: last_op,
 	}, false) // do not retry
 	if push_ok && push_ret.(OpReplyData).IsWrongGroup == false {
 		kv.logger.Printf("Push shard %v to group %v done\n", shard, ps.Group)
@@ -63,9 +66,10 @@ func (kv *ShardKVImpl) pushShards() {
 			kv.mu.Unlock()
 			continue
 		}
+		last_op := kv.shards_client_last_op[shard]
 		kv.mu.Unlock()
 
-		ok := kv.pushShardSingle(shard, ps)
+		ok := kv.pushShardSingle(shard, ps, last_op)
 
 		kv.mu.Lock()
 		if ok && kv.pushing_shards[shard].ConfigNum == ps.ConfigNum {
@@ -147,6 +151,7 @@ func (kv *ShardKVImpl) ApplyOp(typ raftsc.OpType, data interface{}, dup bool) in
 				panic("WTF, shard in data should not be nil")
 			}
 			kv.shards[op_data.ShardNum] = deepcopy.Iface(op_data.Shard).(map[string]string)
+			kv.shards_client_last_op[op_data.ShardNum] = deepcopy.Iface(op_data.ShardClientLastOp).(map[int64]int64)
 			kv.shards_latest_config[op_data.ShardNum] = op_data.ConfigNum
 		}
 		kv.preparePush()
@@ -154,26 +159,35 @@ func (kv *ShardKVImpl) ApplyOp(typ raftsc.OpType, data interface{}, dup bool) in
 	}
 
 	if typ == OP_NEWCONFIG {
-		kv.logger.Printf("Applying new config: %v\n", op_data.Config.Num)
-		if dup || op_data.Config.Num <= kv.config.Num {
-			kv.logger.Printf("Config is old, ignore\n")
-			return nil
+		if !dup && op_data.Config.Num > kv.config.Num {
+			kv.logger.Printf("Applying new config: %v\n", op_data.Config.Num)
+			kv.config = deepcopy.Iface(op_data.Config).(shardmaster.Config)
+			kv.preparePush()
 		}
-		kv.config = op_data.Config
-		kv.preparePush()
 		return nil
 	}
 
 	target_shard := key2shard(op_data.Key)
 	p_shard := kv.shards[target_shard]
-	kv.logger.Printf("Applying OP %v (shard %v)[%v]\n", typ, target_shard, kv.config.Shards[target_shard])
+	kv.logger.Printf("Applying OP %v (shard %v)[%v], id=%v-%v\n", typ, target_shard, kv.config.Shards[target_shard], op_data.ShardOpClient, op_data.ShardOpId)
 	if kv.config.Num == 0 || kv.config.Shards[target_shard] != kv.gid || p_shard == nil {
 		kv.logger.Printf("Wrong group")
 		reply_data.IsWrongGroup = true
 		return reply_data
 	}
 
-	if !dup {
+	if kv.shards_client_last_op[target_shard] == nil {
+		kv.shards_client_last_op[target_shard] = make(map[int64]int64)
+	}
+	shard_dup := kv.shards_client_last_op[target_shard][op_data.ShardOpClient] >= op_data.ShardOpId
+	if !shard_dup {
+		kv.shards_client_last_op[target_shard][op_data.ShardOpClient] = op_data.ShardOpId
+	}
+
+	kv.logger.Printf("LOG last=%v, dup/s-dup: %v/%v\n", kv.shards_client_last_op[target_shard][op_data.ShardOpClient], dup, shard_dup)
+	kv.logger.Printf("LOG %v %v\n", typ, op_data)
+
+	if !shard_dup { // do not check `dup`
 		if typ == OP_PUT {
 			p_shard[op_data.Key] = op_data.Value
 		} else if typ == OP_APPEND {
@@ -187,16 +201,29 @@ func (kv *ShardKVImpl) ApplyOp(typ raftsc.OpType, data interface{}, dup bool) in
 }
 
 func (kv *ShardKVImpl) EncodeSnapshot(enc *gob.Encoder) {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+
 	enc.Encode(kv.shards)
 	enc.Encode(kv.shards_latest_config)
 	enc.Encode(kv.pushing_shards)
+	enc.Encode(kv.shards_client_last_op)
 	enc.Encode(kv.config)
 }
 
 func (kv *ShardKVImpl) DecodeSnapshot(dec *gob.Decoder) {
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
+	// THIS IS IMPORTANT
+	// Decode MERGE maps
+	kv.shards = nil
+	kv.shards_latest_config = nil
+	kv.pushing_shards = nil
+	kv.shards_client_last_op = nil
 	dec.Decode(&kv.shards)
 	dec.Decode(&kv.shards_latest_config)
 	dec.Decode(&kv.pushing_shards)
+	dec.Decode(&kv.shards_client_last_op)
 	dec.Decode(&kv.config)
 }
 
@@ -224,12 +251,13 @@ func StartServer(servers []*labrpc.ClientEnd,
 	gob.Register(OpReplyData{})
 
 	kv := &ShardKVImpl{
-		logger:               log.New(os.Stderr, fmt.Sprintf("[ShardKV G%v(%v)]", gid, me), log.LstdFlags),
-		make_end:             make_end,
-		gid:                  gid,
-		shards:               map[int]map[string]string{},
-		shards_latest_config: map[int]int{},
-		pushing_shards:       map[int]PushingShard{},
+		logger:                log.New(os.Stderr, fmt.Sprintf("[ShardKV G%v(%v)]", gid, me), log.LstdFlags),
+		make_end:              make_end,
+		gid:                   gid,
+		shards:                map[int]map[string]string{},
+		shards_latest_config:  map[int]int{},
+		shards_client_last_op: map[int]map[int64]int64{},
+		pushing_shards:        map[int]PushingShard{},
 	}
 	server := raftsc.StartServer(kv, servers, me, persister, maxraftstate)
 

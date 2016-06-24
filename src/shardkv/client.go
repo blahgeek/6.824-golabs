@@ -10,6 +10,9 @@ package shardkv
 
 import "raftsc"
 import "labrpc"
+import "sync/atomic"
+import "crypto/rand"
+import "math/big"
 import "shardmaster"
 import "time"
 
@@ -31,10 +34,20 @@ type Clerk struct {
 	sm       *shardmaster.Clerk
 	config   shardmaster.Config
 	make_end func(string) *labrpc.ClientEnd
-	// You will have to modify this struct.
+
+	shard_client_id int64
+	shard_op_id     int64
+}
+
+func nrand() int64 {
+	max := big.NewInt(int64(1) << 62)
+	bigx, _ := rand.Int(rand.Reader, max)
+	x := bigx.Int64()
+	return x
 }
 
 func (ck *Clerk) Exec(typ raftsc.OpType, data OpData) string {
+	atomic.AddInt64(&ck.shard_op_id, 1)
 	shard := key2shard(data.Key)
 	for {
 		if ck.config.Num > 0 {
@@ -43,6 +56,9 @@ func (ck *Clerk) Exec(typ raftsc.OpType, data OpData) string {
 				servers = append(servers, ck.make_end(server_name))
 			}
 			client := raftsc.MakeClient(servers, "ShardKV")
+			data.ShardOpClient = ck.shard_client_id
+			data.ShardOpId = ck.shard_op_id
+
 			result := client.Exec(typ, data)
 			op_result := result.(OpReplyData)
 			if !op_result.IsWrongGroup {
@@ -77,7 +93,8 @@ func (ck *Clerk) Append(key, value string) {
 //
 func MakeClerk(masters []*labrpc.ClientEnd, make_end func(string) *labrpc.ClientEnd) *Clerk {
 	return &Clerk{
-		sm:       shardmaster.MakeClerk(masters),
-		make_end: make_end,
+		sm:              shardmaster.MakeClerk(masters),
+		make_end:        make_end,
+		shard_client_id: nrand(),
 	}
 }
