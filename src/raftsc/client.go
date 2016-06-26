@@ -46,6 +46,10 @@ func MakeClient(servers []*labrpc.ClientEnd, service_name string) *RaftClient {
 	return ck
 }
 
+func (ck *RaftClient) SetClientID(id int64) {
+	ck.client_id = id
+}
+
 func (ck *RaftClient) DoExec(typ OpType, data interface{}, retry bool) (bool, interface{}) {
 	var ok bool
 

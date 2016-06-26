@@ -56,6 +56,7 @@ func (ck *Clerk) Exec(typ raftsc.OpType, data OpData) string {
 				servers = append(servers, ck.make_end(server_name))
 			}
 			client := raftsc.MakeClient(servers, "ShardKV")
+			client.SetClientID(ck.shard_client_id) // prevent too big snapshot (too many clien IDs)
 			data.ShardOpClient = ck.shard_client_id
 			data.ShardOpId = ck.shard_op_id
 
