@@ -42,6 +42,7 @@ func (kv *ShardKVImpl) pushShardSingle(shard int, ps PushingShard) (ok bool) {
 		servers = append(servers, kv.make_end(server_name))
 	}
 	client := raftsc.MakeClient(servers, "ShardKV")
+    client.SetClientID(-1) // do not check PULL for dup
 	push_ok, push_ret := client.DoExec(OP_PULL, OpData{
 		ConfigNum:         ps.ConfigNum,
 		ShardNum:          shard,
@@ -121,7 +122,7 @@ func (kv *ShardKVImpl) ApplyOp(typ raftsc.OpType, data interface{}, dup bool) in
 			reply_data.IsWrongGroup = true
 			return reply_data
 		}
-		if !dup && op_data.ConfigNum > kv.shards_latest_config[op_data.ShardNum] {
+		if op_data.ConfigNum > kv.shards_latest_config[op_data.ShardNum] {
 			if kv.shards[op_data.ShardNum] != nil {
 				panic("WTF, shard while receiving PULL should be nil")
 			}
