@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2016-06-13
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2016-06-24
+* @Last Modified time: 2016-06-28
  */
 
 package raftsc
@@ -45,7 +45,8 @@ type RaftServer struct {
 	persister *raft.Persister
 	applyCh   chan raft.ApplyMsg
 
-	maxraftstate int // snapshot if log grows this big
+	maxraftstate       int // snapshot if log grows this big
+	last_applied_index int
 
 	pendingOps     map[int][]*PendingOp // index -> list of ops
 	client_last_op map[int64]int64
@@ -97,11 +98,25 @@ func (rs *RaftServer) Apply(msg *raft.ApplyMsg) {
 		}
 	}
 
+	rs.last_applied_index = msg.Index
+
 	if rs.maxraftstate > 0 && rs.persister.RaftStateSize() >= rs.maxraftstate {
 		rs.logger.Printf("Raft size too large, going to delete old logs\n")
-		snapshot := rs.dumpSnapshot()
-		go rs.rf.DeleteOldLogs(msg.Index, snapshot)
+		go rs.SnapshotAndClean()
 	}
+}
+
+func (rs *RaftServer) SnapshotAndClean() {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+
+	if rs.last_applied_index == 0 || rs.maxraftstate <= 0 {
+		return
+	}
+
+	rs.logger.Printf("SnapshotAndClean...\n")
+	snapshot := rs.dumpSnapshot()
+	go rs.rf.DeleteOldLogs(rs.last_applied_index, snapshot)
 }
 
 func (rs *RaftServer) Exec(op Op, reply *OpReply) {

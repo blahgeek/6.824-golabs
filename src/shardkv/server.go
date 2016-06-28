@@ -42,7 +42,7 @@ func (kv *ShardKVImpl) pushShardSingle(shard int, ps PushingShard) (ok bool) {
 		servers = append(servers, kv.make_end(server_name))
 	}
 	client := raftsc.MakeClient(servers, "ShardKV")
-    client.SetClientID(-1) // do not check PULL for dup
+	client.SetClientID(-1) // do not check PULL for dup
 	push_ok, push_ret := client.DoExec(OP_PULL, OpData{
 		ConfigNum:         ps.ConfigNum,
 		ShardNum:          shard,
@@ -60,7 +60,8 @@ func (kv *ShardKVImpl) pushShardSingle(shard int, ps PushingShard) (ok bool) {
 	return
 }
 
-func (kv *ShardKVImpl) pushShards() {
+func (kv *ShardKVImpl) pushShards() (updated bool) {
+	updated = false
 	for shard, _ := range kv.config.Shards {
 		kv.mu.Lock()
 		ps, exist := kv.pushing_shards[shard]
@@ -74,10 +75,12 @@ func (kv *ShardKVImpl) pushShards() {
 
 		kv.mu.Lock()
 		if ok && kv.pushing_shards[shard].ConfigNum == ps.ConfigNum {
+			updated = true
 			delete(kv.pushing_shards, shard)
 		}
 		kv.mu.Unlock()
 	}
+	return
 }
 
 func (kv *ShardKVImpl) preparePush() {
@@ -256,7 +259,10 @@ func StartServer(servers []*labrpc.ClientEnd,
 
 	go func() {
 		for {
-			kv.pushShards()
+			updated := kv.pushShards()
+			if updated {
+				server.SnapshotAndClean()
+			}
 			time.Sleep(10 * time.Millisecond)
 		}
 	}()
