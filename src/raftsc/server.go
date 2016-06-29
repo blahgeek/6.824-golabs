@@ -76,7 +76,7 @@ func (rs *RaftServer) Apply(msg *raft.ApplyMsg) {
 
 	op := msg.Command.(Op)
 	op_dup := rs.client_last_op[op.Client] >= op.Id
-	op_result := rs.ApplyOp(op.Type, deepcopy.Iface(op.Data), op_dup)
+	op_result := rs.ApplyOp(op.Type, op.Data, op_dup)
 	if !op_dup {
 		rs.client_last_op[op.Client] = op.Id
 	}
@@ -185,6 +185,7 @@ func (rs *RaftServer) loadSnapshot(snapshot []byte) {
 	buf := bytes.NewBuffer(snapshot)
 	dec := gob.NewDecoder(buf)
 	rs.DecodeSnapshot(dec)
+	rs.client_last_op = nil
 	dec.Decode(&rs.client_last_op)
 }
 

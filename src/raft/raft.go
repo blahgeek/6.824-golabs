@@ -28,6 +28,7 @@ import "os"
 import "fmt"
 
 import "bytes"
+import "deepcopy"
 import "encoding/gob"
 
 func majority(n int) int {
@@ -271,7 +272,7 @@ func (rf *Raft) doCommitLogs() {
 		if rf.logs[i] == nil {
 			panic("Logs after snapshotedCount should not be nil")
 		}
-		rf.applyCh <- ApplyMsg{Index: i + 1, Command: rf.logs[i]}
+		rf.applyCh <- ApplyMsg{Index: i + 1, Command: deepcopy.Iface(rf.logs[i])}
 	}
 }
 
