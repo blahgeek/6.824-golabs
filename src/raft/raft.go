@@ -461,6 +461,7 @@ type AppendEntriesArgs struct {
 	EntryTerms   []int
 	// Entry             interface{}
 	// EntryTerm         int
+	Leader            int
 	LeaderCommitCount int
 }
 
@@ -482,7 +483,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		rf.logger.Printf("Got append request with term = %v, update and follow and append\n", args.Term)
 		rf.state = FOLLOWER
 		rf.currentTerm = args.Term
-		rf.votedFor = -1
+		rf.votedFor = args.Leader
 
 		reply.Term = args.Term
 
@@ -563,6 +564,7 @@ func (rf *Raft) sendAppendEntriesAll() {
 		}
 
 		var args AppendEntriesArgs
+		args.Leader = rf.me
 		args.Term = rf.currentTerm
 		args.PrevLogCount = rf.nextIndex[peer]
 		if args.PrevLogCount < rf.snapshotedCount {
