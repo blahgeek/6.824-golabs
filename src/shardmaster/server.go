@@ -8,6 +8,7 @@ import "os"
 import "fmt"
 import "sort"
 import "raftsc"
+import "deepcopy"
 
 type ShardMasterImpl struct {
 	configs []Config
@@ -71,20 +72,14 @@ func (sm *ShardMasterImpl) ApplyOp(typ raftsc.OpType, data interface{}, dup bool
 		if op_data.ConfigNum < 0 || op_data.ConfigNum >= len(sm.configs) {
 			op_data.ConfigNum = len(sm.configs) - 1
 		}
-		return sm.configs[op_data.ConfigNum]
+		return deepcopy.Iface(sm.configs[op_data.ConfigNum]).(Config)
 	}
 
 	if !dup {
 		// make a new config
-		last_config := sm.configs[len(sm.configs)-1]
-		var config Config
-		config.Num = last_config.Num + 1
-		copy(config.Shards[:], last_config.Shards[:])
-		config.Groups = make(map[int][]string)
-		for k, v := range last_config.Groups {
-			config.Groups[k] = make([]string, len(v))
-			copy(config.Groups[k], v)
-		}
+		config := deepcopy.Iface(sm.configs[len(sm.configs)-1]).(Config)
+		config.Num += 1
+
 		switch typ {
 		case OP_JOIN:
 			sm.logger.Printf("Joining %v...\n", op_data.Servers)

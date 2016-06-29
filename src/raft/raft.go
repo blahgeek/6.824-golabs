@@ -118,6 +118,8 @@ func (rf *Raft) DeleteOldLogs(lastIndex int, snapshot []byte) { // called by ser
 	for i := 0; i < rf.snapshotedCount; i += 1 {
 		if i < len(rf.logs) {
 			rf.logs[i] = nil
+		} else {
+			panic("snapshotedCount should not be larger than logs")
 		}
 	}
 	rf.persist()
@@ -215,8 +217,8 @@ func (rf *Raft) handleAppendEntriesResult(reply AppendEntriesReply, peer int) {
 	if reply.Success {
 		rf.nextIndex[peer] = reply.IndexHint
 		if rf.nextIndex[peer] > len(rf.logs) {
-			rf.nextIndex[peer] = len(rf.logs) - 1
-			// panic("nextIndex should not be more than leader's logs")
+			rf.nextIndex[peer] = 0
+			panic("nextIndex should not be more than leader's logs")
 		}
 		rf.matchCount[peer] = rf.nextIndex[peer]
 		this_match_count_peers := 1

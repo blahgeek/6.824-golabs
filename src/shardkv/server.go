@@ -135,8 +135,8 @@ func (kv *ShardKVImpl) ApplyOp(typ raftsc.OpType, data interface{}, dup bool) in
 			kv.shards[op_data.ShardNum] = deepcopy.Iface(op_data.Shard).(map[string]string)
 			kv.shards_client_last_op[op_data.ShardNum] = deepcopy.Iface(op_data.ShardClientLastOp).(map[int64]int64)
 			kv.shards_latest_config[op_data.ShardNum] = op_data.ConfigNum
+			kv.preparePush()
 		}
-		kv.preparePush()
 		return reply_data // unused
 	}
 
