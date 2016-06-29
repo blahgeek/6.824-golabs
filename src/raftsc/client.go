@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2016-06-13
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2016-06-29
+* @Last Modified time: 2016-06-30
  */
 
 package raftsc
@@ -12,8 +12,8 @@ import "crypto/rand"
 import "math/big"
 import "sync/atomic"
 import "log"
-import "os"
 import "fmt"
+import "raft"
 
 type RaftClient struct {
 	servers []*labrpc.ClientEnd
@@ -40,7 +40,7 @@ func MakeClient(name string, servers []*labrpc.ClientEnd, service_name string) *
 		leader:       int(id) % len(servers),
 		client_id:    id,
 		service_name: service_name,
-		logger:       log.New(os.Stderr, fmt.Sprintf("[%v-RaftClient%v]", name, id), log.LstdFlags),
+		logger:       log.New(raft.GetLoggerWriter(), fmt.Sprintf("[%v-RaftClient%v]", name, id), log.LstdFlags),
 	}
 	ck.logger.Printf("New clerk inited\n")
 	return ck
@@ -64,7 +64,7 @@ func (ck *RaftClient) DoExec(typ OpType, data interface{}, retry bool) (bool, in
 		var reply OpReply
 		ck.logger.Printf("Try executing %v to leader %v\n", typ, ck.leader)
 		ok = ck.servers[ck.leader].Call(ck.service_name+".Exec", op, &reply)
-		ck.logger.Printf("Exec result: %v\n", reply)
+		// ck.logger.Printf("Exec result: %v\n", reply)
 		if !ok {
 			ck.logger.Printf("RPC fail, retry=%v\n", retry)
 			if !retry {

@@ -229,7 +229,7 @@ func StartServer(servers []*labrpc.ClientEnd,
 	gob.Register(OpReplyData{})
 
 	kv := &ShardKVImpl{
-		logger:                log.New(os.Stderr, fmt.Sprintf("[ShardKV-G%v(%v)]", gid, me), log.LstdFlags),
+		logger:                log.New(raft.GetLoggerWriter(), fmt.Sprintf("[ShardKV-G%v(%v)]", gid, me), log.LstdFlags),
 		make_end:              make_end,
 		gid:                   gid,
 		shards:                map[int]map[string]string{},

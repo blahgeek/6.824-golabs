@@ -4,7 +4,6 @@ import "raft"
 import "labrpc"
 import "encoding/gob"
 import "log"
-import "os"
 import "fmt"
 import "sort"
 import "raftsc"
@@ -127,7 +126,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 
 	sm := &ShardMasterImpl{
 		configs: make([]Config, 1),
-		logger:  log.New(os.Stderr, fmt.Sprintf("[ShardMaster%v] ", me), log.LstdFlags),
+		logger:  log.New(raft.GetLoggerWriter(), fmt.Sprintf("[ShardMaster%v] ", me), log.LstdFlags),
 	}
 	sm.configs[0].Num = 0
 	sm.configs[0].Groups = make(map[int][]string)

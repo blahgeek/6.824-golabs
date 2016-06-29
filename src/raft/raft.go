@@ -17,19 +17,30 @@ package raft
 //   in the same server.
 //
 
-import "sync"
-import "sync/atomic"
-import "labrpc"
-import "time"
-import crand "crypto/rand"
-import "math/big"
-import "log"
-import "os"
-import "fmt"
+import (
+	"bytes"
+	crand "crypto/rand"
+	"deepcopy"
+	"encoding/gob"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"labrpc"
+	"log"
+	"math/big"
+	"os"
+	"sync"
+	"sync/atomic"
+	"time"
+)
 
-import "bytes"
-import "deepcopy"
-import "encoding/gob"
+func GetLoggerWriter() io.Writer {
+	if enable_log := os.Getenv("GOLAB_ENABLE_LOG"); enable_log != "" {
+		return os.Stderr
+	} else {
+		return ioutil.Discard
+	}
+}
 
 func majority(n int) int {
 	return n/2 + 1
@@ -104,7 +115,7 @@ func (rf *Raft) DeleteOldLogs(lastIndex int, snapshot []byte) { // called by ser
 
 	lastIndex -= 1 // yes, all indexes number starts from 1 outside
 
-	if lastIndex + 1 < rf.snapshotedCount {
+	if lastIndex+1 < rf.snapshotedCount {
 		return
 	}
 
@@ -650,7 +661,7 @@ func (rf *Raft) SetLoggerPrefix(name string) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	rf.logger = log.New(os.Stderr, fmt.Sprintf("[%v-Raft%v] ", name, rf.me), log.LstdFlags)
+	rf.logger = log.New(GetLoggerWriter(), fmt.Sprintf("[%v-Raft%v] ", name, rf.me), log.LstdFlags)
 }
 
 //
@@ -671,7 +682,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persister = persister
 	rf.me = me
 
-	rf.logger = log.New(os.Stderr, fmt.Sprintf("[Node %v] ", me), log.LstdFlags)
+	rf.logger = log.New(GetLoggerWriter(), fmt.Sprintf("[Node %v] ", me), log.LstdFlags)
 
 	// Your initialization code here.
 	rf.state = FOLLOWER

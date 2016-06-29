@@ -2,7 +2,7 @@
 * @Author: BlahGeek
 * @Date:   2016-06-13
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2016-06-29
+* @Last Modified time: 2016-06-30
  */
 
 package raftsc
@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"labrpc"
 	"log"
-	"os"
 	"raft"
 	"sort"
 	"sync"
@@ -128,7 +127,7 @@ func (rs *RaftServer) SnapshotAndClean() {
 }
 
 func (rs *RaftServer) Exec(op Op, reply *OpReply) {
-	rs.logger.Printf("Exec: %v\n", op)
+	// rs.logger.Printf("Exec: %v\n", op)
 
 	op_index, _, is_leader := rs.rf.Start(op)
 	if !is_leader {
@@ -163,7 +162,7 @@ func (rs *RaftServer) Exec(op Op, reply *OpReply) {
 
 	reply.Status = STATUS_OK
 	reply.Data = pending_op.result
-	rs.logger.Printf("Exec return: %v\n", reply)
+	// rs.logger.Printf("Exec return: %v\n", reply)
 }
 
 func (rs *RaftServer) Kill() {
@@ -227,7 +226,7 @@ func StartServer(name string, server_impl RaftServerImpl, servers []*labrpc.Clie
 		applyCh:        make(chan raft.ApplyMsg),
 		pendingOps:     make(map[int][]*PendingOp),
 		client_last_op: make(map[int64]int64),
-		logger:         log.New(os.Stderr, fmt.Sprintf("[%v-RaftServer%v] ", name, me), log.LstdFlags),
+		logger:         log.New(raft.GetLoggerWriter(), fmt.Sprintf("[%v-RaftServer%v] ", name, me), log.LstdFlags),
 	}
 
 	rs.rf = raft.Make(servers, me, persister, rs.applyCh)
