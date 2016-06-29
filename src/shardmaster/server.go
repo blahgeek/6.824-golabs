@@ -108,7 +108,8 @@ func (sm *ShardMasterImpl) EncodeSnapshot(enc *gob.Encoder) {
 }
 
 func (sm *ShardMasterImpl) DecodeSnapshot(dec *gob.Decoder) {
-	dec.Decode(sm.configs)
+	sm.configs = nil
+	dec.Decode(&sm.configs)
 }
 
 func (sm *ShardMasterImpl) Free() {
