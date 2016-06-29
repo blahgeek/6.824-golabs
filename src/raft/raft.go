@@ -520,10 +520,19 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 				}
 			}
 
-			duplicated_entries := len(rf.logs) - args.PrevLogCount
-			if duplicated_entries < len(args.Entries) {
-				rf.logs = append(rf.logs, args.Entries[duplicated_entries:]...)
-				rf.logs_term = append(rf.logs_term, args.EntryTerms[duplicated_entries:]...)
+			for idx := args.PrevLogCount; idx < args.PrevLogCount+len(args.Entries); idx += 1 {
+				if idx < len(rf.logs) && rf.logs_term[idx] != args.EntryTerms[idx-args.PrevLogCount] {
+					rf.logs = rf.logs[:idx]
+					rf.logs_term = rf.logs_term[:idx]
+				}
+				if idx >= len(rf.logs) {
+					if idx > len(rf.logs) {
+						panic("WTF")
+					}
+					rf.logs = append(rf.logs, args.Entries[idx-args.PrevLogCount])
+					rf.logs_term = append(rf.logs_term, args.EntryTerms[idx-args.PrevLogCount])
+					rf.logger.Printf("Replacing %v\n", idx)
+				}
 			}
 
 			if len(rf.logs) >= args.LeaderCommitCount && rf.commitCount < args.LeaderCommitCount {
