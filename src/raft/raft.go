@@ -539,7 +539,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 				rf.commitCount = args.LeaderCommitCount
 				go rf.doCommitLogs()
 			}
-			reply.IndexHint = len(rf.logs)
+			reply.IndexHint = args.PrevLogCount + len(args.Entries)
 			reply.Success = true
 		} else {
 			rf.logger.Printf("It's a heartbeat...\n")
