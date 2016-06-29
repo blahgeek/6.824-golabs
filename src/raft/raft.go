@@ -141,7 +141,7 @@ func (rf *Raft) resetTimer() {
 		val, _ := crand.Int(crand.Reader, big.NewInt(int64(MAX_TIMEOUT-MIN_TIMEOUT)))
 		new_timeout = MIN_TIMEOUT + time.Duration(val.Int64())
 	}
-	// rf.logger.Printf("Resetting timer to %v (I'm %v)\n", new_timeout, rf.state)
+	rf.logger.Printf("Resetting timer to %v (I'm %v)\n", new_timeout, rf.state)
 	rf.timer.Reset(new_timeout)
 }
 
@@ -159,7 +159,7 @@ func (rf *Raft) handleTimer() {
 		rf.sendRequestVotes()
 		rf.granted_votes_count = 1
 	} else {
-		// rf.logger.Printf("Timeout, send heartbeat.\n")
+		rf.logger.Printf("Timeout, send heartbeat.\n")
 		rf.sendAppendEntriesAll()
 	}
 	rf.resetTimer()
@@ -200,7 +200,7 @@ func (rf *Raft) handleAppendEntriesResult(reply AppendEntriesReply, peer int) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	// rf.logger.Printf("Got append entries result: %v\n", reply)
+	rf.logger.Printf("Got append entries result: %v\n", reply)
 
 	if rf.state != LEADER {
 		rf.logger.Printf("I'm not leader now... return\n")
@@ -475,11 +475,11 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 	defer rf.mu.Unlock()
 
 	if args.Term < rf.currentTerm {
-		// rf.logger.Printf("Got append request with term = %v, drop it\n", args.Term)
+		rf.logger.Printf("Got append request with term = %v, drop it\n", args.Term)
 		reply.Term = rf.currentTerm
 		reply.Success = false
 	} else {
-		// rf.logger.Printf("Got append request with term = %v, update and follow and append\n", args.Term)
+		rf.logger.Printf("Got append request with term = %v, update and follow and append\n", args.Term)
 		rf.state = FOLLOWER
 		rf.currentTerm = args.Term
 		rf.votedFor = -1
@@ -500,7 +500,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 			reply.IndexHint = rf.snapshotedCount
 			reply.Success = true
 		} else if args.PrevLogCount > 0 && (len(rf.logs) < args.PrevLogCount || rf.logs_term[args.PrevLogCount-1] != args.PrevLogTerm) {
-			// rf.logger.Printf("But not match: %v\n", args)
+			rf.logger.Printf("But not match: %v\n", args)
 			reply.IndexHint = len(rf.logs)
 			if reply.IndexHint >= args.PrevLogCount {
 				reply.IndexHint = args.PrevLogCount
@@ -631,6 +631,13 @@ func (rf *Raft) Kill() {
 	// free up memory
 	rf.logs = nil
 	rf.logs_term = nil
+}
+
+func (rf *Raft) SetLoggerPrefix(name string) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	rf.logger = log.New(os.Stderr, fmt.Sprintf("[%v-Raft%v] ", name, rf.me), log.LstdFlags)
 }
 
 //

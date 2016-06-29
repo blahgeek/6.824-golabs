@@ -40,7 +40,7 @@ func (kv *ShardKVImpl) pushShardSingle(shard int, ps PushingShard) (ok bool) {
 	for _, server_name := range ps.Servers {
 		servers = append(servers, kv.make_end(server_name))
 	}
-	client := raftsc.MakeClient(servers, "ShardKV")
+	client := raftsc.MakeClient("ShardKV-Push", servers, "ShardKV")
 	client.SetClientID(-1) // do not check PULL for dup
 	push_ok, push_ret := client.DoExec(OP_PULL, OpData{
 		ConfigNum:         ps.ConfigNum,
@@ -229,7 +229,7 @@ func StartServer(servers []*labrpc.ClientEnd,
 	gob.Register(OpReplyData{})
 
 	kv := &ShardKVImpl{
-		logger:                log.New(os.Stderr, fmt.Sprintf("[ShardKV G%v(%v)]", gid, me), log.LstdFlags),
+		logger:                log.New(os.Stderr, fmt.Sprintf("[ShardKV-G%v(%v)]", gid, me), log.LstdFlags),
 		make_end:              make_end,
 		gid:                   gid,
 		shards:                map[int]map[string]string{},
@@ -237,14 +237,14 @@ func StartServer(servers []*labrpc.ClientEnd,
 		shards_client_last_op: map[int]map[int64]int64{},
 		pushing_shards:        map[int]PushingShard{},
 	}
-	server := raftsc.StartServer(kv, servers, me, persister, maxraftstate)
+	server := raftsc.StartServer(fmt.Sprintf("ShardKV-G%v", gid), kv, servers, me, persister, maxraftstate)
 
 	// watch for configs
 	if me == 0 {
 		go func() {
 			var last_config shardmaster.Config
 			master_clerk := shardmaster.MakeClerk(masters)
-			server_clerk := raftsc.MakeClient(servers, "ShardKV")
+			server_clerk := raftsc.MakeClient("ShardKV-config", servers, "ShardKV")
 			for {
 				config := master_clerk.Query(last_config.Num + 1)
 				if config.Num != last_config.Num {

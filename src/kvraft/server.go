@@ -46,6 +46,6 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	gob.Register(OpData{})
 
 	kvserver := &RaftKVImpl{data: make(map[string]string)}
-	server := raftsc.StartServer(kvserver, servers, me, persister, maxraftstate)
+	server := raftsc.StartServer("RaftKV", kvserver, servers, me, persister, maxraftstate)
 	return &RaftKV{server, server.Raft()}
 }

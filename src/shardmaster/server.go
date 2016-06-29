@@ -127,7 +127,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 
 	sm := &ShardMasterImpl{
 		configs: make([]Config, 1),
-		logger:  log.New(os.Stderr, fmt.Sprintf("[ShardMaster %v] ", me), log.LstdFlags),
+		logger:  log.New(os.Stderr, fmt.Sprintf("[ShardMaster%v] ", me), log.LstdFlags),
 	}
 	sm.configs[0].Num = 0
 	sm.configs[0].Groups = make(map[int][]string)
@@ -135,6 +135,6 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 		sm.configs[0].Shards[i] = 0
 	}
 
-	server := raftsc.StartServer(sm, servers, me, persister, -1)
+	server := raftsc.StartServer(fmt.Sprintf("ShardMaster%v", me), sm, servers, me, persister, -1)
 	return &ShardMaster{server, server.Raft()}
 }

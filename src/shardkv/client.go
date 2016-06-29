@@ -55,7 +55,7 @@ func (ck *Clerk) Exec(typ raftsc.OpType, data OpData) string {
 			for _, server_name := range ck.config.Groups[ck.config.Shards[shard]] {
 				servers = append(servers, ck.make_end(server_name))
 			}
-			client := raftsc.MakeClient(servers, "ShardKV")
+			client := raftsc.MakeClient(fmt.Sprintf("ShardKV%v", ck.shard_client_id), servers, "ShardKV")
 			client.SetClientID(ck.shard_client_id) // prevent too big snapshot (too many clien IDs)
 			data.ShardOpClient = ck.shard_client_id
 			data.ShardOpId = ck.shard_op_id

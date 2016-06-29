@@ -12,7 +12,7 @@ type Clerk struct {
 }
 
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
-	c := raftsc.MakeClient(servers, "ShardMaster")
+	c := raftsc.MakeClient("ShardMaster", servers, "ShardMaster")
 	return &Clerk{c}
 }
 

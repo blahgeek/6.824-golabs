@@ -90,11 +90,11 @@ func (rs *RaftServer) Apply(msg *raft.ApplyMsg) {
 
 	for _, x := range this_pending {
 		if x.op.Client == op.Client && x.op.Id == op.Id {
-			// rs.logger.Printf("Pending op: %v, success\n", x.op)
+			rs.logger.Printf("Pending op: %v, success\n", x.op)
 			x.result = deepcopy.Iface(op_result)
 			x.c <- true
 		} else {
-			// rs.logger.Printf("Pending op: %v, fail\n", x.op)
+			rs.logger.Printf("Pending op: %v, fail\n", x.op)
 			x.c <- false
 		}
 	}
@@ -121,7 +121,7 @@ func (rs *RaftServer) SnapshotAndClean() {
 }
 
 func (rs *RaftServer) Exec(op Op, reply *OpReply) {
-	// rs.logger.Printf("Exec: %v\n", op)
+	rs.logger.Printf("Exec: %v\n", op)
 
 	op_index, _, is_leader := rs.rf.Start(op)
 	if !is_leader {
@@ -156,7 +156,7 @@ func (rs *RaftServer) Exec(op Op, reply *OpReply) {
 
 	reply.Status = STATUS_OK
 	reply.Data = pending_op.result
-	// rs.logger.Printf("Exec return: %v\n", reply)
+	rs.logger.Printf("Exec return: %v\n", reply)
 }
 
 func (rs *RaftServer) Kill() {
@@ -206,7 +206,7 @@ func (rs *RaftServer) Raft() *raft.Raft {
 // StartKVServer() must return quickly, so it should start goroutines
 // for any long-running work.
 //
-func StartServer(server_impl RaftServerImpl, servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int) *RaftServer {
+func StartServer(name string, server_impl RaftServerImpl, servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int) *RaftServer {
 	// call gob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
 	gob.Register(Op{})
@@ -220,10 +220,11 @@ func StartServer(server_impl RaftServerImpl, servers []*labrpc.ClientEnd, me int
 		applyCh:        make(chan raft.ApplyMsg),
 		pendingOps:     make(map[int][]*PendingOp),
 		client_last_op: make(map[int64]int64),
-		logger:         log.New(os.Stderr, fmt.Sprintf("[RaftServer %v] ", me), log.LstdFlags),
+		logger:         log.New(os.Stderr, fmt.Sprintf("[%v-RaftServer%v] ", name, me), log.LstdFlags),
 	}
 
 	rs.rf = raft.Make(servers, me, persister, rs.applyCh)
+	rs.rf.SetLoggerPrefix(fmt.Sprintf("%v-RaftServer%v", name, me))
 
 	go func() {
 		for {

@@ -31,6 +31,6 @@ func (ck *Clerk) Append(key string, value string) {
 }
 
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
-	c := raftsc.MakeClient(servers, "RaftKV")
+	c := raftsc.MakeClient("RaftKV", servers, "RaftKV")
 	return &Clerk{c}
 }
