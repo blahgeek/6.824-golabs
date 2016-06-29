@@ -15,6 +15,7 @@ import "crypto/rand"
 import "math/big"
 import "shardmaster"
 import "time"
+import "fmt"
 
 //
 // which shard is a key in?
