@@ -104,7 +104,7 @@ func (rf *Raft) DeleteOldLogs(lastIndex int, snapshot []byte) { // called by ser
 
 	lastIndex -= 1 // yes, all indexes number starts from 1 outside
 
-	if lastIndex < rf.snapshotedCount {
+	if lastIndex + 1 < rf.snapshotedCount {
 		return
 	}
 

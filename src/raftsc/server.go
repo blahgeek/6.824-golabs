@@ -48,6 +48,7 @@ type RaftServer struct {
 
 	maxraftstate       int // snapshot if log grows this big
 	last_applied_index int
+	last_snapshot_size int // snapshot size for last_applied_index
 
 	pendingOps     map[int][]*PendingOp // index -> list of ops
 	client_last_op map[int64]int64
@@ -100,6 +101,7 @@ func (rs *RaftServer) Apply(msg *raft.ApplyMsg) {
 	}
 
 	rs.last_applied_index = msg.Index
+	rs.last_snapshot_size = 0
 
 	if rs.maxraftstate > 0 && rs.persister.RaftStateSize() >= rs.maxraftstate {
 		rs.logger.Printf("Raft size too large, going to delete old logs\n")
@@ -117,6 +119,11 @@ func (rs *RaftServer) SnapshotAndClean() {
 
 	rs.logger.Printf("SnapshotAndClean...\n")
 	snapshot := rs.dumpSnapshot()
+	if rs.last_snapshot_size > 0 && len(snapshot) > rs.last_snapshot_size {
+		rs.logger.Printf("A smaller snapshot already exists\n")
+		return
+	}
+	rs.last_snapshot_size = len(snapshot)
 	go rs.rf.DeleteOldLogs(rs.last_applied_index, snapshot)
 }
 
