@@ -513,18 +513,20 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 			}
 			reply.Success = false
 		} else if args.Entries != nil {
-			rf.logger.Printf("Appending log from %v (count %v)\n", args.PrevLogCount, len(args.Entries))
+			rf.logger.Printf("Appending log from %v (count %v) (I've got %v already)\n", args.PrevLogCount, len(args.Entries), len(rf.logs))
 			for _, e := range args.Entries {
 				if e == nil {
 					panic("Entries in AppendEntries cannot be nil")
 				}
 			}
-			rf.logs = rf.logs[:args.PrevLogCount]
-			rf.logs_term = rf.logs_term[:args.PrevLogCount]
-			rf.logs = append(rf.logs, args.Entries...)
-			rf.logs_term = append(rf.logs_term, args.EntryTerms...)
 
-			if len(rf.logs) >= args.LeaderCommitCount {
+			duplicated_entries := len(rf.logs) - args.PrevLogCount
+			if duplicated_entries < len(args.Entries) {
+				rf.logs = append(rf.logs, args.Entries[duplicated_entries:]...)
+				rf.logs_term = append(rf.logs_term, args.EntryTerms[duplicated_entries:]...)
+			}
+
+			if len(rf.logs) >= args.LeaderCommitCount && rf.commitCount < args.LeaderCommitCount {
 				rf.commitCount = args.LeaderCommitCount
 				go rf.doCommitLogs()
 			}
