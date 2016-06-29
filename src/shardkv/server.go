@@ -9,7 +9,6 @@ import "log"
 import "os"
 import "fmt"
 import "time"
-import "deepcopy"
 import "encoding/gob"
 
 type PushingShard struct {
@@ -132,8 +131,8 @@ func (kv *ShardKVImpl) ApplyOp(typ raftsc.OpType, data interface{}, dup bool) in
 			if op_data.Shard == nil {
 				panic("WTF, shard in data should not be nil")
 			}
-			kv.shards[op_data.ShardNum] = deepcopy.Iface(op_data.Shard).(map[string]string)
-			kv.shards_client_last_op[op_data.ShardNum] = deepcopy.Iface(op_data.ShardClientLastOp).(map[int64]int64)
+			kv.shards[op_data.ShardNum] = op_data.Shard
+			kv.shards_client_last_op[op_data.ShardNum] = op_data.ShardClientLastOp
 			kv.shards_latest_config[op_data.ShardNum] = op_data.ConfigNum
 			kv.preparePush()
 		}
@@ -143,7 +142,7 @@ func (kv *ShardKVImpl) ApplyOp(typ raftsc.OpType, data interface{}, dup bool) in
 	if typ == OP_NEWCONFIG {
 		if !dup && op_data.Config.Num > kv.config.Num {
 			kv.logger.Printf("Applying new config: %v\n", op_data.Config.Num)
-			kv.config = deepcopy.Iface(op_data.Config).(shardmaster.Config)
+			kv.config = op_data.Config
 			kv.preparePush()
 		}
 		return nil

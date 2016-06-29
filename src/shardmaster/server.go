@@ -72,7 +72,7 @@ func (sm *ShardMasterImpl) ApplyOp(typ raftsc.OpType, data interface{}, dup bool
 		if op_data.ConfigNum < 0 || op_data.ConfigNum >= len(sm.configs) {
 			op_data.ConfigNum = len(sm.configs) - 1
 		}
-		return deepcopy.Iface(sm.configs[op_data.ConfigNum]).(Config)
+		return sm.configs[op_data.ConfigNum]
 	}
 
 	if !dup {

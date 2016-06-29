@@ -2,13 +2,14 @@
 * @Author: BlahGeek
 * @Date:   2016-06-13
 * @Last Modified by:   BlahGeek
-* @Last Modified time: 2016-06-28
+* @Last Modified time: 2016-06-29
  */
 
 package raftsc
 
 import (
 	"bytes"
+	"deepcopy"
 	"encoding/gob"
 	"fmt"
 	"labrpc"
@@ -75,7 +76,7 @@ func (rs *RaftServer) Apply(msg *raft.ApplyMsg) {
 
 	op := msg.Command.(Op)
 	op_dup := rs.client_last_op[op.Client] >= op.Id
-	op_result := rs.ApplyOp(op.Type, op.Data, op_dup)
+	op_result := rs.ApplyOp(op.Type, deepcopy.Iface(op.Data), op_dup)
 	if !op_dup {
 		rs.client_last_op[op.Client] = op.Id
 	}
@@ -90,7 +91,7 @@ func (rs *RaftServer) Apply(msg *raft.ApplyMsg) {
 	for _, x := range this_pending {
 		if x.op.Client == op.Client && x.op.Id == op.Id {
 			// rs.logger.Printf("Pending op: %v, success\n", x.op)
-			x.result = op_result
+			x.result = deepcopy.Iface(op_result)
 			x.c <- true
 		} else {
 			// rs.logger.Printf("Pending op: %v, fail\n", x.op)
