@@ -70,8 +70,8 @@ const (
 )
 
 const (
-	MIN_TIMEOUT        = time.Millisecond * 200
-	MAX_TIMEOUT        = time.Millisecond * 500
+	MIN_TIMEOUT        = time.Millisecond * 100
+	MAX_TIMEOUT        = time.Millisecond * 300
 	HEARTBEAT_INTERVAL = time.Millisecond * 50
 )
 
